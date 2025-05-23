@@ -45,6 +45,8 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     pin = models.CharField(max_length=4, default='0000')
     voice_mode = models.BooleanField(default=False)
     enable_biometrics_login = models.BooleanField(default=False)
+    is_email_verified = models.BooleanField(default=False)
+
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)

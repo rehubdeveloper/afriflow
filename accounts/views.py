@@ -10,6 +10,42 @@ from django.db import transaction
 from decimal import Decimal
 from django.db.models import Q
 import requests
+from django.core.mail import send_mail
+from django.urls import reverse
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
+from .tokens import email_verification_token
+from django.utils.http import urlsafe_base64_decode
+from django.utils.encoding import force_str
+from django.http import HttpResponse
+
+
+def send_verification_email(user, request):
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = email_verification_token.make_token(user)
+    verify_url = request.build_absolute_uri(
+        reverse('verify-email', kwargs={'uidb64': uid, 'token': token})
+    )
+    subject = 'Verify your email'
+    message = f'Click the link to verify your email: {verify_url}'
+    send_mail(subject, message, 'rehubdevelopers@gmail.com', [user.email])
+
+class VerifyEmailView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, uidb64, token):
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = CustomUser.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, CustomUser.DoesNotExist):
+            user = None
+
+        if user and email_verification_token.check_token(user, token):
+            user.is_email_verified = True
+            user.save()
+            return Response({'message': 'Email successfully verified.'})
+        else:
+            return Response({'message': 'Invalid or expired token.'}, status=400)
 
 class RegistrationView(generics.CreateAPIView):
     serializer_class = RegistrationSerializer
@@ -19,6 +55,7 @@ class RegistrationView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        send_verification_email(user, request)
         refresh = RefreshToken.for_user(user)
         return Response({
             'refresh': str(refresh),
@@ -33,11 +70,17 @@ class LoginView(generics.GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
+
+        # Email verification check
+        if not user.is_email_verified:
+            return Response({"error": "Email is not verified."}, status=403)
+
         refresh = RefreshToken.for_user(user)
         return Response({
             'refresh': str(refresh),
             'access': str(refresh.access_token),
         }, status=status.HTTP_200_OK)
+
 
 class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
@@ -287,3 +330,5 @@ class ChatSessionListView(APIView):
         chat_sessions = ChatSession.objects.filter(user=user).order_by('-updated_at')
         serializer = ChatSessionSerializer(chat_sessions, many=True)
         return Response(serializer.data)
+    
+
